@@ -1,0 +1,26 @@
+# Signs the Claude VPS desktop app's component manifest. src/manifest.rs and
+# src/bin/sign-manifest.rs are byte-for-byte copies of the app's own; the library is named
+# vps_desktop_core so they build unchanged.
+[package]
+name = "vps-desktop-manifest"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "vps_desktop_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sign-manifest"
+path = "src/bin/sign-manifest.rs"
+
+[dependencies]
+base64 = "0.22"
+ed25519-dalek = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+
+# A workspace of its own, never a member of one around it.
+[workspace]

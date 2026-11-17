@@ -1,0 +1,61 @@
+# Regenerates the desktop app's signed component manifest (design point 9 in the app's docs/desktop-app.md).
+# Only the schedule and a manual run by someone with write access start it; no outside event can.
+name: components
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: components
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Checks every upstream file and writes the unsigned payload; any failure stops the run here.
+      - name: List the components
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 components.py "$RUNNER_TEMP/payload.json"
+
+      # The app's own signer: it checks the envelope with the app's verifier before writing it.
+      # The seed reaches it only through the environment.
+      - name: Sign the manifest
+        env:
+          MANIFEST_SIGNING_KEY: ${{ secrets.MANIFEST_SIGNING_KEY }}
+        run: |
+          cargo run --locked --release --quiet --manifest-path manifest/Cargo.toml --bin sign-manifest -- \
+            "$RUNNER_TEMP/payload.json" "$RUNNER_TEMP/components.json.next"
+
+      # Uploads the new manifest beside the old one, then swaps the names. If the upload fails,
+      # the published components.json stays as it was.
+      - name: Publish the manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          api="repos/$GITHUB_REPOSITORY/releases"
+          asset() { gh api "$api/tags/components" --jq ".assets[] | select(.name == \"$1\") | .id"; }
+          # A run that stopped before the rename leaves a components.json.next nobody reads.
+          stale=$(asset components.json.next)
+          if [ -n "$stale" ]; then gh api -X DELETE "$api/assets/$stale"; fi
+          gh release upload components "$RUNNER_TEMP/components.json.next" --repo "$GITHUB_REPOSITORY"
+          next=$(asset components.json.next)
+          test -n "$next"
+          old=$(asset components.json)
+          if [ -n "$old" ]; then gh api -X DELETE "$api/assets/$old"; fi
+          gh api -X PATCH "$api/assets/$next" -f name=components.json --jq .name

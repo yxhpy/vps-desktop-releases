@@ -25,9 +25,9 @@ Windows 和 Linux 版还没有。
 | `Claude-VPS-macos-arm64.dmg` | 第一次安装 |
 | `Claude-VPS-macos-arm64.app.tar.gz` 和同名 `.sig` | App 自动更新用的安装包和它的签名 |
 | `latest.json` | 告诉 App 最新版本是哪个、去哪下载 |
-| `components.json`（在「components」这个发布里） | App 安装 Claude Code、Claude Desktop 和 CC Switch 时用的清单 |
+| `components.json` 和 `components-b.json`（在「components」这个发布里） | App 安装 Claude Code、Claude Desktop 和 CC Switch 时用的清单，两份内容相同、轮流更新 |
 
-`components.json` 每 6 小时由本仓库的 Actions 重新生成并签名：
+组件清单每 6 小时由本仓库的 Actions 重新生成并签名。每次只替换两份里较旧的那份，所以任何时候线上都有一份完整的清单，App 取两份里较新的一份：
 
 - `components.py` 从各自的官方来源取最新版本，逐个校验后列出；
 - `manifest/` 用 App 自己的校验代码签名，App 不会接受的清单不会被签出来；

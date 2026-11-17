@@ -40,29 +40,33 @@ jobs:
           MANIFEST_SIGNING_KEY: ${{ secrets.MANIFEST_SIGNING_KEY }}
         run: |
           cargo run --locked --release --quiet --manifest-path manifest/Cargo.toml --bin sign-manifest -- \
-            "$RUNNER_TEMP/payload.json" "$RUNNER_TEMP/components.json.next"
+            "$RUNNER_TEMP/payload.json" "$RUNNER_TEMP/signed.json"
 
-      # Uploads the new manifest beside the old one, then swaps the names. If the upload fails,
-      # the published components.json stays as it was.
+      # Two copies of the manifest, components.json and components-b.json: the app reads both and
+      # takes the newest that verifies. Each run replaces only the older copy, so the newest stays
+      # online untouched however this step fails (blocking line U5).
       - name: Publish the manifest
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           api="repos/$GITHUB_REPOSITORY/releases"
           asset() { gh api "$api/tags/components" --jq ".assets[] | select(.name == \"$1\") | .id"; }
-          # A run that stopped before the rename leaves a components.json.next nobody reads.
-          stale=$(asset components.json.next)
-          if [ -n "$stale" ]; then gh api -X DELETE "$api/assets/$stale"; fi
-          gh release upload components "$RUNNER_TEMP/components.json.next" --repo "$GITHUB_REPOSITORY"
-          next=$(asset components.json.next)
-          test -n "$next"
-          old=$(asset components.json)
-          if [ -n "$old" ]; then gh api -X DELETE "$api/assets/$old"; fi
-          # Until the rename there is no components.json, so a failed rename is retried rather than
-          # left to the next run, up to 6 hours away.
-          for attempt in 1 2 3; do
-            if gh api -X PATCH "$api/assets/$next" -f name=components.json --jq .name; then exit 0; fi
-            sleep 10
+          # The copy to replace: a missing one, else the one uploaded earlier.
+          target=$(gh api "$api/tags/components" --jq '[.assets[] | {name, created_at}] as $have
+            | ["components.json", "components-b.json"]
+            | map(. as $copy | {name: $copy, at: ([$have[] | select(.name == $copy) | .created_at] | first // "")})
+            | min_by(.at) | .name')
+          test -n "$target"
+          # A run that stopped before its rename leaves a .next nobody reads.
+          for name in components.json.next components-b.json.next; do
+            stale=$(asset "$name")
+            if [ -n "$stale" ]; then gh api -X DELETE "$api/assets/$stale"; fi
           done
-          echo '::error::the rename kept failing: there is no components.json until the next run'
-          exit 1
+          mkdir -p "$RUNNER_TEMP/upload"
+          cp "$RUNNER_TEMP/signed.json" "$RUNNER_TEMP/upload/$target.next"
+          gh release upload components "$RUNNER_TEMP/upload/$target.next" --repo "$GITHUB_REPOSITORY"
+          next=$(asset "$target.next")
+          test -n "$next"
+          old=$(asset "$target")
+          if [ -n "$old" ]; then gh api -X DELETE "$api/assets/$old"; fi
+          gh api -X PATCH "$api/assets/$next" -f name="$target" --jq .name
